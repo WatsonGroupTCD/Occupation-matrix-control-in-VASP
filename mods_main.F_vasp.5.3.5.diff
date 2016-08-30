@@ -1,0 +1,11 @@
+--- main_orig.F	2014-04-28 17:41:17.856624429 +0100
++++ main.F	2014-04-28 17:42:32.263159987 +0100
+@@ -684,7 +684,7 @@
+ !-----------------------------------------------------------------------
+       CALL LDAU_READER(T_INFO%NTYP,IO%IU5,IO%IU0)
+       IF (USELDApU().OR.LCALC_ORBITAL_MOMENT()) &
+-     &   CALL INITIALIZE_LDAU(T_INFO%NIONS,T_INFO%NTYP,P,WDES%LNONCOLLINEAR,IO%IU0,IO%IDIOT)
++     &   CALL INITIALIZE_LDAU(T_INFO%NIONS,T_INFO%NTYP,P,WDES%LNONCOLLINEAR,IO%IU5,IO%IU6,IO%IU0,IO%IDIOT)
+ 
+       CALL SET_PAW_AUG(T_INFO%NTYP, P, IO%IU6, LMAX_CALC, LCOMPAT)
+ !-----------------------------------------------------------------------
