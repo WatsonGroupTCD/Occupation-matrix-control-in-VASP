@@ -7,3 +7,5 @@ Occupation matrix control sets the occupations used when calculating the DFT+U c
 2) To obtain localisation at a specific site (atom and location) and look for the minimum energy occupation.
 
 More details can be found in the pdf.
+
+26/06/2019  Added patch files for vasp.5.4.4 
