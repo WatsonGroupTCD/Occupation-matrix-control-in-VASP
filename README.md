@@ -77,7 +77,7 @@ Occupations are set on two atoms:
 
 NOTE - Non-colinnear input does not include the imaginary component of the matrix elements and is therefore not recommended. 
 
-### OCCEXT     
+#### OCCEXT     
 
 We have implemented a direct occupation matrix input for atoms through an external file. This greatly helps when 
 1) the crystal field is not aligned with the axis of the structure (in which case a number of off diagonal elements are required)
