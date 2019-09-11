@@ -1,0 +1,353 @@
+--- src/main.F.orig	2019-08-27 12:30:51.611100850 +0100
++++ src/main.F	2019-08-27 12:30:51.483101008 +0100
+@@ -756,7 +756,8 @@
+       ENDIF
+ 
+       IF (USELDApU().OR.LCALC_ORBITAL_MOMENT()) &
+-     &   CALL INITIALIZE_LDAU(T_INFO%NIONS,T_INFO%NTYP,P,WDES%LNONCOLLINEAR,IO%IU0,IO%IDIOT)
++! GWW added I/O for LDA so can read Occupation matrix control 
++     &   CALL INITIALIZE_LDAU(T_INFO%NIONS,T_INFO%NTYP,P,WDES%LNONCOLLINEAR,IO%IU5,IO%IU6,IO%IU0,IO%IDIOT)
+ 
+       CALL SET_PAW_AUG(T_INFO%NTYP, P, IO%IU6, LMAX_CALC, LCOMPAT)
+ !-----------------------------------------------------------------------
+--- src/LDApU.F.orig	2019-08-27 12:30:51.486101005 +0100
++++ src/LDApU.F	2019-08-27 12:30:51.801100617 +0100
+@@ -37,7 +37,14 @@
+       REAL(q), PRIVATE, ALLOCATABLE, SAVE :: ORBMOM(:,:,:)
+ 
+       COMPLEX(q), PRIVATE, SAVE :: V(7,7,7,7)
+-        
++
++! GWW - input occupation matrix
++      OVERLAP, PRIVATE, ALLOCATABLE, SAVE :: OCC_MAT_INPUT(:,:,:,:)
++      INTEGER, PRIVATE, ALLOCATABLE, SAVE :: ATOM_OCC(:)
++      INTEGER, PRIVATE, ALLOCATABLE, SAVE :: ATOM_L(:)
++      INTEGER, PRIVATE, SAVE :: OCC_NATOMS, OCC_PNATOMS
++! END GWW
++
+       CONTAINS
+ 
+ !**********************************************************************
+@@ -178,7 +185,10 @@
+       END SUBROUTINE LDAU_READER   
+ 
+ 
+-      SUBROUTINE INITIALIZE_LDAU(NIONS,NTYP,P,LNONCOLLINEAR,IU,IDIOT)
++! GWW - change for occupation matrix
++      SUBROUTINE INITIALIZE_LDAU(NIONS,NTYP,P,LNONCOLLINEAR,IU5,IU6,IU,IDIOT)
++! GWW
++
+       
+       USE pseudo
+       
+@@ -197,9 +207,33 @@
+       COMPLEX(q) CDUM
+       LOGICAL LDUM
+ 
++!GWW occupation matrix - for the I/O
++      INTEGER, PARAMETER :: NDIM=500
++      INTEGER :: IU5,IU6
++      INTEGER :: N, IERR, ITMP
++      LOGICAL :: LOPEN
++      CHARACTER (1) :: CHARAC
++      REAL(q) :: FTMP(NDIM)
++
++!GWW for occupation matrix
++      INTEGER :: NUM_ORB
++      INTEGER :: START
++      INTEGER :: occ_spin
++      INTEGER :: i, ii, j, jj, i1, i2, is
++      CHARACTER (10)  ::  Keyword
++      CHARACTER (3)  ::  keynum 
++      character (100) ::  occ_format  
++!GWW
++
+       NCDIJ=2
+       IF (LNONCOLLINEAR) NCDIJ=4
+ 
++!GWW - occupation matrix - for reading INCAR 
++      LOPEN=.FALSE.
++      OPEN(UNIT=IU5,FILE='INCAR',STATUS='OLD')
++!GWW
++
++
+ !=======================================================================
+ !  Sanity check: L(S)DA+U only implemented for PAW potentials
+ !=======================================================================
+@@ -231,6 +265,235 @@
+          ALLOCATE(ORBMOM(LMAX_,3,NIONS))
+          ORBMOM=0._q
+       ENDIF
++
++!----------------------------------------------------------------------
++! GWW - input of occupation matrix 
++
++      ALLOCATE(OCC_MAT_INPUT(16,16,NCDIJ,NIONS))
++#ifdef realmode
++      OCC_MAT_INPUT=0._q 
++#else
++      OCC_MAT_INPUT=(0._q,0_q )
++#endif 
++      ALLOCATE(ATOM_OCC(NIONS),ATOM_L(NIONS)) 
++
++! Occupation matric input allowing specifcation of matrix elements
++! up to 999 line in INCAR !  OCCDIRX   X=1,999
++
++      do jj = 1, 999
++      if (jj.lt.10) then
++         write(keynum,'(I1)')jj 
++      else if (jj.lt.100) then 
++         write(keynum,'(I2)')jj 
++      else 
++         write(keynum,'(I3)')jj 
++      endif 
++      keyword = 'OCCDIR'//keynum 
++
++      CALL RDATAB(LOPEN,'INCAR',IU5, keyword ,'=','#',';','F', &
++     &   IDUM,FTMP,CDUM,LDUM,CHARAC,N,NDIM,IERR)
++
++         IF ((IERR/=0) .AND. (IERR/=3)) THEN
++            WRITE(IU6,*) " "
++            WRITE(IU6,'("Error in ",a9," format. Format should be")') keyword 
++            WRITE(IU6,*)"'No of atoms, No * (ATOM, LDAUL, &
++        &               No of elements, No of E *( i, j, spin, occ))"
++            WRITE(IU6,*)" Everything else will be set to zero !" 
++            STOP
++         ENDIF
++
++        IF (IERR==0) then
++
++          IF(IU6>0)  then
++            WRITE(IU6,*) " "
++            WRITE(IU6,'(" ",a9," found ")') keyword 
++!            WRITE(IU6,*)'No of atoms, No * (ATOM, LDAUL, & 
++!                  & No of elements, No of E *( i, j, spin, occ))'
++!            WRITE(IU6,*)' i and j vary from 1 - 16. &
++!                  & 1:s, 2-4:p, 5-9:d, 10-16:f'
++!            WRITE(IU6,*)' Everything else will be set to zero !' 
++          endif 
++
++         OCC_PNATOMS = OCC_NATOMS
++         OCC_NATOMS = OCC_PNATOMS + INT(FTMP(1))
++         j=1
++         do i = OCC_PNATOMS+1, OCC_NATOMS
++            ATOM_OCC(i) = INT(FTMP(1+j))
++            ATOM_L(i)   = INT(FTMP(2+j))
++            NUM_ORB     = INT(FTMP(3+j)) 
++
++            do ii = 1, NUM_ORB 
++                 i1 = FTMP(4+j+(ii-1)*4)
++                 i2 = FTMP(5+j+(ii-1)*4)
++                 is = FTMP(6+j+(ii-1)*4)
++#ifdef realmode 
++                 OCC_MAT_INPUT(i1,i2,is,ATOM_OCC(i)) = FTMP(7+j+(ii-1)*4)
++#else
++                 OCC_MAT_INPUT(i1,i2,is,ATOM_OCC(i)) = CMPLX( FTMP(7+j+(ii-1)*4), 0, q) 
++#endif 
++            enddo 
++
++          j = j + 3 + NUM_ORB*4 
++
++          enddo 
++
++        ENDIF 
++
++       ENDDO
++
++! end of OCCDIRXXX input 
++!-----------------------------------
++! alternative matrix input from external file OCCMATRIX 
++
++              CALL RDATAB(LOPEN,'INCAR',IU5,'OCCEXT','=','#',';','I', &
++     &   ITMP,RDUM,CDUM,LDUM,CHARAC,N,1,IERR)
++
++         if((IERR/=0) .AND. (IERR/=3)) THEN
++            write(IU6,*) " "
++            write(IU6,'(" Error in OCCEXT format. Format is in the occupation matrix documentation")') 
++            write(IU6,*) " "
++            write(IU6,*) " "
++            stop
++         endif
++
++        if(ITMP==1.and.IERR==0) then 
++          If(IU6>0)  then
++            write(IU6,*) " "
++            write(IU6,'(" OCCEXT found - reading occupation matrix from external file OCCMATRIX")')
++            write(IU6,*) " "
++          endif
++
++        open(unit=999,file='OCCMATRIX',status='OLD')
++
++        read(999,*) occ_natoms
++
++        do i=1,occ_natoms
++         read(999,*) atom_occ(i), atom_l(i), occ_spin 
++
++! calculate start point in matrix from summing the number of orbitals for
++! angular momentum less that that of interest
++         NUM_ORB     = 2*ATOM_L(i)+1
++         START = 0
++         do ii = ATOM_L(i)-1, 0, -1
++           START = START + 2*ii+1
++         enddo
++         START = START+1
++
++! real occupation matrix only (occ_spin 1 or 2) 
++         if(occ_spin<=2) then
++           do is = 1, occ_spin 
++             read(999,*)
++             do i1 = start, start+num_orb-1   
++
++               read(999,*) (FTMP(i2), i2=start, start+num_orb-1 ) 
++!           read(999,*) (OCC_MAT_INPUT(i1,i2,2,ATOM_OCC(i)), i2=start, start+num_orb-1 ) 
++
++#ifdef realmode 
++               do i2 = start, start+num_orb-1 
++                 OCC_MAT_INPUT(i1,i2,is,ATOM_OCC(i))=FTMP(i2) 
++               enddo 
++#else
++               do i2 = start, start+num_orb-1 
++                 OCC_MAT_INPUT(i1,i2,is,ATOM_OCC(i))=CMPLX (FTMP(i2), 0, q)
++               enddo 
++#endif 
++             enddo 
++
++           enddo
++         endif
++
++
++! spin orbit occupation matrix (occ_spin 4) 
++         if(occ_spin==4) then
++#ifdef realmode
++            write(IU6,*) " "
++            write(IU6,'(" Non-Collinear occupation matrix - but VASP is not compiled for noncollinear calculations.")') 
++            write(IU6,*) " "
++            stop
++#else
++            do is = 1, occ_spin ! read 4 matrices for the noncollinear real and imaginary components.
++               read(999,*)
++               do i1 = start, start+num_orb-1   
++                  read(999,*) (FTMP(i2), i2=start, start+2*num_orb-1 )
++                  do i2 = start, start+num_orb-1 
++                     OCC_MAT_INPUT(i1,i2,is,ATOM_OCC(i))=CMPLX (FTMP(i2), FTMP(i2+num_orb), q)
++                  enddo 
++               enddo
++            enddo
++#endif          
++         endif
++
++         read(999,*) 
++          
++        enddo 
++
++
++        endif  
++
++
++! end of matrix input
++!-----------------------------------
++! write out occupation matrices - first spin up then spin down 
++
++     IF(IU6>0) THEN
++       WRITE(IU6,*) " "
++       WRITE(IU6,*) "Occupation matrix control coded by Prof. Graeme Watson "
++       write(IU6,*) "at Trinity College Dublin"
++       WRITE(IU6,*) " "
++       WRITE(IU6,*) "Occupation set for the following atoms "
++       WRITE(IU6,*) " "
++
++       do ii = 1,OCC_NATOMS
++
++! calculate start point in matrix from summing the number of orbitals for
++! angular momentum less that that of interest
++         NUM_ORB = 2*ATOM_L(ii)+1
++         START = 0
++         do i1 = ATOM_L(ii)-1, 0, -1
++           START = START + 2*i1+1
++         enddo
++         START = START+1
++
++! Loop over spins 
++         do i2 = 1, NCDIJ 
++
++           WRITE(IU6,*) " "
++           WRITE(IU6,*) "ATOM ",ATOM_OCC(ii)," Spin ", i2   
++
++#ifdef realmode 
++           write (occ_format, '(a,I2,a)') '(4X,',num_orb,'(3X,I2,3X))' 
++           WRITE(IU6,occ_format) (j, j=start,start+num_orb-1)
++
++           write (occ_format, '(a,I2,a,I2,a)') '(I2,2X,',num_orb,'(F7.4,X),2X,I2)' 
++           do i = start, start+num_orb-1 
++             WRITE(IU6,occ_format) i,  &
++                    & (OCC_MAT_INPUT(i,j,i2,ATOM_OCC(ii)), j=start,start+num_orb-1) ,i
++           enddo
++
++#else
++           write (occ_format, '(a,I2,a,I2,a)') '(4X,',num_orb,'(3X,I2,3X),6X,',num_orb,'(3X,I2,3X))' 
++           WRITE(IU6,occ_format) (j, j=start,start+num_orb-1),(jj, jj=start,start+num_orb-1) 
++
++           write (occ_format, '(a,I2,a,I2,a)') '(I2,2X,',num_orb,'(F7.4,X),2X,I2,2X,',num_orb,'(F7.4,X),2X,I2))' 
++           do i = start, start+num_orb-1 
++             WRITE(IU6,occ_format) i,  &
++                    & ( real( OCC_MAT_INPUT(i,j,i2,ATOM_OCC(ii)) ), j=start,start+num_orb-1) ,i, &
++                    & (aimag( OCC_MAT_INPUT(i,j,i2,ATOM_OCC(ii)) ), j=start,start+num_orb-1) ,i
++           enddo 
++
++#endif 
++         enddo
++       enddo
++      ENDIF 
++
++
++! Close INCAR
++
++         CLOSE(IU5)
++
++! END GWW
++
++!-----------------------------------------------------------------------------------------------------
+       
+       RETURN 
+       END SUBROUTINE INITIALIZE_LDAU 
+@@ -376,6 +639,10 @@
+       INTEGER ISP,LN1,LN2,LMN1,LMN2,L1,L2,M1,M2,LM1,LM2
+       INTEGER LNMAX,LMMAX
+ 
++!GWW
++      INTEGER :: I, I2, II, jj, START
++!GWW END
++
+       DBLE_LDAU=0._q
+       OCC_MAT=0._q
+       OCC_MAT_ALL(:,:,:,IATOM)=0._q
+@@ -430,6 +697,29 @@
+ !     ENDIF
+ ! test
+ 
++! GWW Set Occupation Matrix for Atoms input
++
++          do i = 1,OCC_NATOMS
++
++             if(ATOM_OCC(i)/=IATOM) CYCLE
++             START = 0
++             do ii = ATOM_L(i)-1, 0, -1
++                START = START + 2*ii+1
++             enddo
++             START = START+1
++             do ii = START, START + ATOM_L(i)*2
++                do jj = START, START + ATOM_L(i)*2
++                   do i2 = 1, NCDIJ 
++                     OCC_MAT(ii,jj,i2)=OCC_MAT_INPUT(ii,jj,i2,ATOM_OCC(i))
++                   enddo
++                enddo
++             enddo
++
++          enddo
++
++! GWW
++
++
+       OCC_MAT_ALL(:,:,:,IATOM)=OCC_MAT(:,:,:)
+       
+ !==============================================================
