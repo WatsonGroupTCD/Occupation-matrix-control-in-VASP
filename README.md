@@ -80,10 +80,10 @@ NOTE - Non-colinnear input does not include the imaginary component of the matri
 ### OCCEXT     
 
 We have implemented a direct occupation matrix input for atoms through an external file. This greatly helps when 
-•	the crystal field is not aligned with the axis of the structure (in which case a number of off diagonal elements are required)
-•	dealing with atoms with large numbers of d and f electrons
-•	there is a specific orbital distortion (e.g. due to vacancies or at surfaces) 
-•	there is significant co-valent interactions resulting in more d occupation than simply the filling of specific orbitals.
+1) the crystal field is not aligned with the axis of the structure (in which case a number of off diagonal elements are required)
+2) dealing with atoms with large numbers of d and f electrons
+3) there is a specific orbital distortion (e.g. due to vacancies or at surfaces) 
+4) there is significant co-valent interactions resulting in more d occupation than simply the filling of specific orbitals.
 To use this you need a good guess of the occupation matrix appropriate for the environment. This can often be achieve by using OCCDIR on a simple unit cell or taken from another crystal structure (e.g. for a particular oxidation state) 
 
 Reading in from an external file (OCCMATRIX) is specified in the INCAR by the tag OCCEXT = 1. 
